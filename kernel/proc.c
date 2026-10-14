@@ -5,7 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-
+#include "uproc.h"
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -109,6 +109,7 @@ allocpid()
 static struct proc *
 allocproc(void)
 {
+
   struct proc *p;
 
   for (p = proc; p < &proc[NPROC]; p++) {
@@ -124,7 +125,7 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
-
+p->trace_mask = 0; // New process starts with tracing disabled
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
     freeproc(p);
@@ -155,6 +156,7 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  p->trace_mask = 0; // Clear the trace mask when the process is freed
   if (p->trapframe)
     kfree((void *)p->trapframe);
   p->trapframe = 0;
@@ -273,6 +275,7 @@ kfork(void)
     release(&np->lock);
     return -1;
   }
+  np->trace_mask = p->trace_mask;
   np->sz = p->sz;
 
   // copy saved user registers.
@@ -700,4 +703,69 @@ procdump(void)
     printk("%d %s %s", p->pid, state, p->name);
     printk("\n");
   }
+}
+
+uint64
+countprocs(void)
+{
+  uint64 count = 0;
+  struct proc *p;
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+
+    if (p->state != UNUSED) {
+      count++;
+    }
+
+    release(&p->lock);
+  }
+
+  return count;
+}
+
+int
+getprocsinfo(uint64 addr, int max)
+{
+  struct proc *p;
+  struct proc *current = myproc();
+  struct uproc info;
+  int count = 0;
+
+  if (max < 0)
+    return -1;
+
+  for (p = proc; p < &proc[NPROC] && count < max; p++) {
+
+    // Protect the parent relationship
+    acquire(&wait_lock);
+    acquire(&p->lock);
+
+    if (p->state == UNUSED) {
+      release(&p->lock);
+      release(&wait_lock);
+      continue;
+    }
+
+    // Copy process information into a local structure
+    info.pid = p->pid;
+    info.ppid = p->parent ? p->parent->pid : 0;
+    info.state = p->state;
+    info.sz = p->sz;
+    safestrcpy(info.name, p->name, sizeof(info.name));
+
+    // Release locks before copying to user memory
+    release(&p->lock);
+    release(&wait_lock);
+
+    // Copy one process entry into the user's array
+    if (copyout(current->pagetable, current->sz,
+                addr + count * sizeof(info),
+                (char *)&info, sizeof(info)) < 0)
+      return -1;
+
+    count++;
+  }
+
+  return count;
 }

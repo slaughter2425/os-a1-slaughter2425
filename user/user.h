@@ -1,8 +1,9 @@
 #define SBRK_ERROR ((char *)-1)
 
 struct stat;
-
-// system calls
+struct sysinfo;
+struct uproc;
+// system calls, for xargs
 int fork(void);
 int exit(int) __attribute__((noreturn));
 int wait(int *);
@@ -25,7 +26,9 @@ char *sys_sbrk(int, int);
 int pause(int);
 int uptime(void);
 int sync(void);
-
+int trace(int mask); //allows user programs to call trace
+int sysinfo(struct sysinfo *info);
+int getprocs(struct uproc *buf, int max);
 // ulib.c
 int stat(const char *, struct stat *);
 char *strcpy(char *, const char *);
